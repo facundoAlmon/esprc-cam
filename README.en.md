@@ -201,7 +201,7 @@ OTA (Over The Air) firmware update — no cables needed.
 
 ## 🔗 Integration with esprc-brain
 
-This module is designed to complement **[esprc-brain](../esprc-brain/)**. Integration is fully automatic:
+This module is designed to complement **[esprc-brain](https://github.com/facundoAlmon/esprc-brain/)**. Integration is fully automatic:
 
 1.  **Auto-discovery:** The brain runs `discover_camera_task` (FreeRTOS, every 30 s) which queries mDNS for `esprc-cam`. When the IP is found, it is stored in NVS and exposed at `GET /api/camera`.
 
