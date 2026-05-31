@@ -1,0 +1,7 @@
+## IDF Component Manager Manifest File
+dependencies:
+  idf:
+    version: '>=6.0.0'
+  bblanchon/arduinojson: "^7.4.2"
+  espressif/mdns: "^1.0.0"
+  espressif/esp32-camera: "^2.0.0"
