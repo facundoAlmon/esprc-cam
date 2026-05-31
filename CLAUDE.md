@@ -136,3 +136,4 @@ PWDN=32, XCLK=0, SIOD=26, SIOC=27, D7=35, D6=34, D5=39, D4=36, D3=21, D2=19, D1=
 | POST | `/manage` | `{restartESP, clearPreferences}` |
 | GET | `/api/ota/info` | Firmware info |
 | POST | `/api/ota` | OTA upload |
+
