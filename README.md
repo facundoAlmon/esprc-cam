@@ -6,7 +6,7 @@
 
 ¡Bienvenido al repositorio de ESP-RC Cam! Este proyecto es el módulo de cámara del sistema ESP-RC Car, construido sobre un módulo AI-Thinker ESP32-CAM con sensor OV2640. Transmite video en vivo por Wi-Fi en formato MJPEG directamente a la webapp del cerebro del coche, dándole a tu RC una verdadera visión en primera persona.
 
-Este módulo está diseñado para trabajar en conjunto con **[esprc-brain](../esprc-brain/)**, aunque también puede usarse de forma independiente desde cualquier navegador.
+Este módulo está diseñado para trabajar en conjunto con **[esprc-brain](https://github.com/facundoAlmon/esprc-brain)**, aunque también puede usarse de forma independiente desde cualquier navegador.
 
 ## ✨ Características Principales
 
