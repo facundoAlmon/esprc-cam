@@ -2,6 +2,7 @@
 #include "mjpeg_server.h"
 #include "streamer.h"
 #include "camera_driver.h"
+#include "led_status.h"
 #include "esp_http_server.h"
 #include "esp_ota_ops.h"
 #include "esp_app_desc.h"
@@ -190,9 +191,21 @@ static esp_err_t post_config_handler(httpd_req_t* req) {
     APPLY_BOOL("statsEnabled",statsEnabled)
 
     if (cam_changed) {
+        // Pause streaming tasks so that deinit() does not race with a concurrent
+        // fb_get() — the VSYNC semaphore becomes corrupt if deinit() destroys it
+        // while another task is blocked waiting on it.
+        led_status_set(LED_RETRY);
+        camera_pause();
+        vTaskDelay(pdMS_TO_TICKS(200)); // wait for any in-flight fb_get to finish
         camera_reinit(g_state);
+        vTaskDelay(pdMS_TO_TICKS(200)); // let DMA settle before tasks resume
+        camera_resume();
+        led_status_set(mjpeg_server_has_client() ? LED_STREAMING : LED_READY);
     } else {
-        camera_apply_settings(g_state);
+        // Image-only change: apply without touching framesize/quality.
+        // camera_apply_settings() always calls set_framesize() which restarts
+        // the I2S DMA and can corrupt the VSYNC semaphore → fb_get hangs.
+        camera_apply_image_settings(g_state);
     }
 
     CORS(req);
@@ -440,7 +453,7 @@ void webserver_start(CameraState* st) {
     cfg.stack_size          = 12288;
     cfg.max_uri_handlers    = 20;
     cfg.max_open_sockets    = 7;
-    cfg.recv_wait_timeout   = 30;
+    cfg.recv_wait_timeout   = 5;
     cfg.send_wait_timeout   = 10;
     cfg.lru_purge_enable    = true;
     cfg.uri_match_fn        = httpd_uri_match_wildcard;

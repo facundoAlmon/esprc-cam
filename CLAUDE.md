@@ -46,8 +46,9 @@ npm run build    # → copies index.html to Firmware/main/
 | File | Responsibility |
 |------|---------------|
 | `main.c` | Entry point, calls `app_task_start()` |
-| `src/main.cpp` | WiFi init (AP/STA), NVS prefs, camera init, webserver start |
-| `src/camera_driver.cpp` | OV2640 init with PSRAM, `camera_apply_settings()` |
+| `src/main.cpp` | WiFi init (AP/STA), NVS prefs, camera init (5-retry), webserver start |
+| `src/camera_driver.cpp` | OV2640 init (PWDN cycle + PSRAM), pause/resume guard, `camera_apply_settings()` |
+| `src/led_status.cpp` | Onboard LED (GPIO 33) state machine — BOOT/RETRY/READY/STREAMING patterns |
 | `src/streamer.cpp` | WebSocket binary JPEG streaming task (FreeRTOS, pinned to core 1) |
 | `src/webserver.cpp` | HTTP server: MJPEG, WS, config, OTA, scan-brain endpoints |
 | `src/nvs_prefs.cpp` | NVS wrapper (identical to brain) |
@@ -69,12 +70,30 @@ Both expose the same OV2640 hardware JPEG frames. `CAMERA_GRAB_WHEN_EMPTY + fb_c
 | `httpd` | any | 5 | API + WS handler |
 | `streamer` | 1 | 6 | WS frame sender |
 | `main_task` | any | 5 | sleeps after init |
+| `led_status` | any | 1 | GPIO 33 blink driver, 50 ms tick |
+
+### Camera Reliability Mechanisms
+
+**Initialization order** — camera init runs BEFORE NVS and WiFi:
+1. NVS allocs from DMA-capable DRAM; if done first, less free DRAM causes `frame_copy_cnt=2` instead of 3, shrinking the PSRAM buffer → no SOI on every frame.
+2. WiFi ISRs (level 3) preempt the VSYNC ISR (level 1) during init → DMA misses SOI bytes.
+
+Fix: init camera with hardcoded defaults (QVGA/12), drain 5 warmup frames, then load NVS + reinit camera with saved framesize/quality.
+
+**PWDN power-cycle** — `camera_init()` toggles GPIO 32 HIGH (10 ms) → LOW (300 ms) before `esp_camera_init()`. The AI-Thinker module sometimes holds the OV2640 in an undefined state after a soft reset; the cycle puts it in a known state before SCCB probing.
+
+**5-retry init loop** — `main_task` retries `camera_init()` up to 5 times with 1 s delay between attempts. On total failure calls `esp_restart()` (not an infinite loop) to reset all hardware state cleanly.
+
+**DMA stuck recovery** — both `mjpeg_server` and `streamer` count consecutive NULL `fb_get()` returns. After 3 failures (~6 s) they call `camera_pause()` + `camera_reinit()` + `camera_resume()`. The webserver's `post_config_handler` does the same when framesize/quality change.
+
+**`camera_pause()` / `camera_resume()`** — volatile bool that streaming tasks poll before calling `fb_get()`. After setting `camera_pause = true`, caller waits 200 ms (enough for any in-flight `fb_get()` in the normal/non-stuck case to return) before `camera_reinit()`.
 
 ### Camera Frame Buffer Constraints
 
 - `fb_count=1`, `CAMERA_GRAB_WHEN_EMPTY` — intentional. `fb_count=2` triggers a pipelining bug in esp32-camera v2.x on ESP32 (VSYNC semaphore becomes inconsistent). Do NOT change.
 - Single buffer means `mjpeg_task` and `streamer` compete for the same buffer. Fix: streamer checks `mjpeg_server_has_client()` and backs off (50 ms sleep) while MJPEG has an active client.
 - Raw TCP sockets (mjpeg_server) need `SO_SNDTIMEO` set explicitly — httpd's `send_wait_timeout` config does NOT apply to them. Without it, a stalled client blocks `send()` indefinitely → FPS drops to 0.
+- `CONFIG_LWIP_MAX_SOCKETS=16` — httpd (1+7) + mjpeg_srv (1+1) = ~10 at peak; 16 gives headroom to avoid `ENFILE` under burst connections.
 
 ### Camera Config Keys
 
@@ -120,6 +139,19 @@ STA fallback: returns to AP mode after 10 failed connection attempts.
 ### Camera Pins (AI-Thinker ESP32-CAM)
 
 PWDN=32, XCLK=0, SIOD=26, SIOC=27, D7=35, D6=34, D5=39, D4=36, D3=21, D2=19, D1=18, D0=5, VSYNC=25, HREF=23, PCLK=22
+
+### LED Status (GPIO 33)
+
+Onboard red LED (active LOW). Driven by `led_status` task (priority 1, 50 ms tick).
+
+| State | Pattern | Meaning |
+|-------|---------|---------|
+| `LED_BOOT` | 1 Hz slow blink (500 ms on/off) | ESP booting, camera not yet initialized |
+| `LED_RETRY` | 5 Hz fast blink (100 ms on/off) | Camera init retry or DMA reinit in progress |
+| `LED_READY` | Solid ON | Camera OK, no active stream client |
+| `LED_STREAMING` | 2 Hz medium blink (250 ms on/off) | Client connected, streaming frames |
+
+State transitions: `main.cpp` drives BOOT→RETRY→READY; `mjpeg_server` and `streamer` drive READY↔STREAMING and STREAMING→RETRY→STREAMING on DMA recovery; `webserver` drives RETRY→READY/STREAMING on config-triggered reinit.
 
 ## REST API
 

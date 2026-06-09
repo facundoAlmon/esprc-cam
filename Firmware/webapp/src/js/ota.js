@@ -13,6 +13,24 @@ function fmtBytes(n) {
     return (n / (1024 * 1024)).toFixed(2) + ' MB';
 }
 
+var selectedFile = null;
+
+function setSelectedFile(file) {
+    selectedFile = file;
+    var label = document.getElementById('ota-file-label');
+    var zone  = document.getElementById('ota-drop-zone');
+    if (!label || !zone) return;
+    if (file) {
+        label.removeAttribute('data-i18n');
+        label.textContent = file.name + ' (' + fmtBytes(file.size) + ')';
+        zone.classList.add('has-file');
+    } else {
+        label.setAttribute('data-i18n', 'otaDropZone');
+        label.textContent = t('otaDropZone', 'Drop .bin file here or click to choose');
+        zone.classList.remove('has-file');
+    }
+}
+
 export async function refreshOtaInfo() {
     var info = await fetchAPI('api/ota/info');
     var infoEl = document.getElementById('ota-info');
@@ -67,11 +85,11 @@ function setOtaProgress(percent, label) {
 export async function uploadFirmware() {
     var input = document.getElementById('ota-file-input');
     var uploadBtn = document.getElementById('ota-upload-btn');
-    if (!input || !input.files || !input.files[0]) {
+    var file = selectedFile || (input && input.files && input.files[0]);
+    if (!file) {
         alert(t('otaSelectFile', 'Please select a firmware .bin file first.'));
         return;
     }
-    var file = input.files[0];
 
     if (!file.name.toLowerCase().endsWith('.bin')) {
         if (!confirm(t('otaNotBinConfirm', 'File does not end with .bin. Continue anyway?'))) return;
@@ -131,11 +149,44 @@ export function initOta() {
     if (fileInput) {
         fileInput.addEventListener('change', function() {
             var f = fileInput.files && fileInput.files[0];
-            var label = document.getElementById('ota-file-label');
-            if (label) {
-                label.textContent = f
-                    ? f.name + ' (' + fmtBytes(f.size) + ')'
-                    : t('otaNoFile', 'No file selected');
+            setSelectedFile(f || null);
+        });
+    }
+
+    var zone = document.getElementById('ota-drop-zone');
+    if (zone) {
+        zone.addEventListener('click', function() {
+            var inp = document.getElementById('ota-file-input');
+            if (inp) inp.click();
+        });
+
+        zone.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            zone.classList.add('drag-over');
+        });
+
+        zone.addEventListener('dragenter', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            zone.classList.add('drag-over');
+        });
+
+        zone.addEventListener('dragleave', function(e) {
+            e.stopPropagation();
+            // Only remove if leaving the zone itself (not a child element)
+            if (!zone.contains(e.relatedTarget)) {
+                zone.classList.remove('drag-over');
+            }
+        });
+
+        zone.addEventListener('drop', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            zone.classList.remove('drag-over');
+            var files = e.dataTransfer && e.dataTransfer.files;
+            if (files && files.length > 0) {
+                setSelectedFile(files[0]);
             }
         });
     }

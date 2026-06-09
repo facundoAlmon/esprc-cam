@@ -1,5 +1,7 @@
 #include "streamer.h"
 #include "mjpeg_server.h"
+#include "camera_driver.h"
+#include "led_status.h"
 #include "esp_camera.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -40,6 +42,7 @@ static void stream_task(void* arg) {
     uint32_t frame_count = 0;
     uint32_t bytes_count = 0;
     int64_t t_start = esp_timer_get_time();
+    int fail_count = 0;
 
     while (s_running) {
         // Don't grab frames when no WS clients — avoids starving the MJPEG handler.
@@ -48,6 +51,7 @@ static void stream_task(void* arg) {
         xSemaphoreGive(s_clients_mutex);
 
         if (client_count == 0) {
+            fail_count = 0;
             vTaskDelay(pdMS_TO_TICKS(50));
             continue;
         }
@@ -56,15 +60,37 @@ static void stream_task(void* arg) {
         // an active client. Both tasks share fb_count=1 — competing for the
         // same buffer causes mutual blocking spikes and FPS drops on both streams.
         if (mjpeg_server_has_client()) {
+            fail_count = 0;
             vTaskDelay(pdMS_TO_TICKS(50));
+            continue;
+        }
+
+        // Block while a camera reinit is in progress.
+        if (camera_is_paused()) {
+            vTaskDelay(pdMS_TO_TICKS(20));
             continue;
         }
 
         camera_fb_t* fb = esp_camera_fb_get();
         if (!fb) {
-            vTaskDelay(pdMS_TO_TICKS(10));
+            // DMA/VSYNC stuck — recover only when MJPEG has no client (if MJPEG
+            // is active it will handle recovery itself via its own fail_count).
+            if (++fail_count >= 3 && !mjpeg_server_has_client() && !camera_is_paused()) {
+                ESP_LOGW(TAG, "Camera DMA stuck (%d timeouts) — reiniting", fail_count);
+                led_status_set(LED_RETRY);
+                camera_pause();
+                vTaskDelay(pdMS_TO_TICKS(200));
+                camera_reinit(s_state);
+                vTaskDelay(pdMS_TO_TICKS(200));
+                camera_resume();
+                led_status_set(LED_STREAMING);
+                fail_count = 0;
+            } else {
+                vTaskDelay(pdMS_TO_TICKS(100));
+            }
             continue;
         }
+        fail_count = 0;
 
         xSemaphoreTake(s_clients_mutex, portMAX_DELAY);
         if (s_client_count > 0) {
@@ -138,6 +164,7 @@ void streamer_add_client(int fd) {
     if (s_client_count < MAX_WS_CLIENTS) {
         s_clients[s_client_count++] = fd;
         ESP_LOGI(TAG, "WS client added fd=%d, total=%d", fd, s_client_count);
+        if (s_client_count == 1) led_status_set(LED_STREAMING);
     }
     xSemaphoreGive(s_clients_mutex);
 }
@@ -149,6 +176,7 @@ void streamer_remove_client(int fd) {
         if (s_clients[i] == fd) {
             s_clients[i] = s_clients[--s_client_count];
             ESP_LOGI(TAG, "WS client removed fd=%d, total=%d", fd, s_client_count);
+            if (s_client_count == 0) led_status_set(LED_READY);
             break;
         }
     }

@@ -16,6 +16,7 @@
 #include "state.h"
 #include "nvs_prefs.h"
 #include "camera_driver.h"
+#include "led_status.h"
 #include "webserver.h"
 #include "dns_server.h"
 #include "espnow_cam.h"
@@ -176,6 +177,8 @@ static void init_preferences(void) {
 }
 
 static void main_task(void*) {
+    led_status_init();  // GPIO 33 init + LED task start (shows BOOT slow-blink)
+
     esp_err_t nvs_ret = nvs_flash_init();
     if (nvs_ret == ESP_ERR_NVS_NO_FREE_PAGES || nvs_ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -202,9 +205,20 @@ static void main_task(void*) {
     camState.jpegQuality = 12;
     camState.fpsLimit    = 0;
 
-    if (camera_init(&camState) != ESP_OK) {
-        ESP_LOGE(TAG, "Camera init failed — halting");
-        while (true) vTaskDelay(pdMS_TO_TICKS(1000));
+    {
+        esp_err_t cam_err = ESP_FAIL;
+        for (int attempt = 1; attempt <= 5; attempt++) {
+            cam_err = camera_init(&camState);
+            if (cam_err == ESP_OK) break;
+            led_status_set(LED_RETRY);
+            ESP_LOGW(TAG, "Camera init attempt %d/5 failed (%s)", attempt, esp_err_to_name(cam_err));
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+        if (cam_err != ESP_OK) {
+            ESP_LOGE(TAG, "Camera init failed after 5 attempts — restarting");
+            vTaskDelay(pdMS_TO_TICKS(500));
+            esp_restart();
+        }
     }
 
     // Drain a few frames so the DMA ring is in steady state before anything
@@ -224,7 +238,14 @@ static void main_task(void*) {
 
     // Now it is safe to load NVS preferences and start WiFi.
     init_preferences();
-    // Apply any settings that differ from the defaults used at init.
+
+    // Reinit camera with the saved framesize/quality from NVS. The initial
+    // camera_init() above used hardcoded defaults (QVGA/12) because the NVS
+    // hadn't been loaded yet and the DMA buffer must be sized correctly from
+    // the start. No streaming tasks are running yet so reinit is safe.
+    camera_reinit(&camState);
+
+    // Apply image settings (brightness, AWB, etc.) that reinit doesn't touch.
     camera_apply_image_settings(&camState);
 
     init_wifi();
@@ -244,6 +265,7 @@ static void main_task(void*) {
         }
     }
 
+    led_status_set(LED_READY);
     ESP_LOGI(TAG, "esprc-cam ready. IP: %s  mDNS: %s.local", camState.espIP, camState.hostname);
 
 

@@ -295,9 +295,12 @@
         <div class="form-grid">
           <div class="form-group">
             <label data-i18n="otaSelectBin">Firmware binary (.bin)</label>
-            <div class="ota-file-row">
-              <button class="secondary" type="button" onclick="document.getElementById('ota-file-input').click()" data-i18n="otaChooseFile">Choose file</button>
-              <span id="ota-file-label" data-i18n="otaNoFile">No file selected</span>
+            <div class="ota-drop-zone" id="ota-drop-zone">
+              <svg xmlns="http://www.w3.org/2000/svg" height="36" viewBox="0 0 24 24" width="36" fill="currentColor" aria-hidden="true">
+                <path d="M0 0h24v24H0z" fill="none"/>
+                <path d="M19.35 10.04A7.49 7.49 0 0012 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 000 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/>
+              </svg>
+              <span id="ota-file-label" data-i18n="otaDropZone">Drop .bin file here or click to choose</span>
               <input type="file" id="ota-file-input" accept=".bin,application/octet-stream" style="display:none">
             </div>
           </div>

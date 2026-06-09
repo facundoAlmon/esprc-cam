@@ -24,6 +24,8 @@ Este módulo está diseñado para trabajar en conjunto con **[esprc-brain](https
 
 -   **Actualización OTA:** Actualizá el firmware de la cámara sin cables desde la pestaña "Actualizar" de la webapp, con barra de progreso y confirmación.
 
+-   **Indicador LED de estado:** El LED rojo incorporado (GPIO 33) comunica el estado actual del sistema de un vistazo: parpadeo lento al arrancar, parpadeo rápido durante reintentos de cámara, encendido sólido cuando está listo y parpadeo medio mientras hay un cliente transmitiendo.
+
 -   **Firmware Puro ESP-IDF:** Escrito en C++ sobre ESP-IDF 6.0 sin dependencias de Arduino. Doble partición OTA para actualizaciones seguras.
 
 -   **Modos de Conectividad:**
@@ -39,8 +41,9 @@ esprc-cam/
     │   ├── main.c                  # Punto de entrada → app_task_start()
     │   ├── index.html              # Webapp compilada (generada por gulp)
     │   └── src/
-    │       ├── main.cpp            # Init WiFi (AP/STA), NVS, cámara, servidor web
-    │       ├── camera_driver.cpp   # Init OV2640 con PSRAM, camera_apply_settings()
+    │       ├── main.cpp            # Init WiFi (AP/STA), NVS, cámara (5 reintentos), servidor web
+    │       ├── camera_driver.cpp   # Init OV2640 (ciclo PWDN + PSRAM), pausa/reanuda DMA
+    │       ├── led_status.cpp      # LED indicador de estado (GPIO 33)
     │       ├── mjpeg_server.cpp    # Servidor TCP raw MJPEG (puerto 81, core 0)
     │       ├── streamer.cpp        # Tarea de streaming WebSocket (core 1)
     │       ├── webserver.cpp       # API REST, OTA, WebSocket, redirects
@@ -224,6 +227,17 @@ Para más detalles sobre la integración, ver [../CLAUDE.md](../CLAUDE.md).
 3.  Realizá tus cambios y hacé commit (`git commit -m 'Agrego mi mejora'`).
 4.  Subí tu rama (`git push origin feature/mi-mejora`).
 5.  Abrí un **Pull Request**.
+
+## 💡 LED Indicador de Estado
+
+El LED rojo incorporado del módulo AI-Thinker ESP32-CAM (GPIO 33) muestra el estado del sistema en todo momento:
+
+| Patrón | Significado |
+|--------|-------------|
+| Parpadeo lento 1 Hz | Iniciando — cámara todavía no inicializada |
+| Parpadeo rápido 5 Hz | Reintentando — fallo de init o DMA reinit en progreso |
+| Encendido sólido | Listo — cámara OK, esperando cliente |
+| Parpadeo medio 2 Hz | Streaming — cliente conectado, transmitiendo frames |
 
 ## 📝 Tareas Pendientes (ToDo)
 

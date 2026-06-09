@@ -20,3 +20,10 @@ esp_err_t camera_reinit(const CameraState* st);
 
 // Shut down camera (call before OTA or full restart).
 void camera_deinit(void);
+
+// Pause/resume camera capture. While paused, MJPEG and WS streamer tasks will
+// not call esp_camera_fb_get(). Use this to guard camera_reinit() during live
+// streaming so that deinit() does not race with a concurrent fb_get().
+void camera_pause(void);
+void camera_resume(void);
+bool camera_is_paused(void);

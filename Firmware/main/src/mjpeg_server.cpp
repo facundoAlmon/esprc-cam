@@ -1,4 +1,6 @@
 #include "mjpeg_server.h"
+#include "camera_driver.h"
+#include "led_status.h"
 #include "esp_camera.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
@@ -69,18 +71,42 @@ static void handle_client(int fd) {
     }
 
     s_client_active = true;
+    led_status_set(LED_STREAMING);
 
     char part_hdr[128];
     uint32_t frame_count = 0;
     uint32_t bytes_count = 0;
     int64_t  t_start = esp_timer_get_time();
 
+    int fail_count = 0;
+
     while (s_running) {
+        // Block while a camera reinit is in progress — deinit() races with fb_get().
+        while (camera_is_paused() && s_running) {
+            vTaskDelay(pdMS_TO_TICKS(20));
+        }
+        if (!s_running) break;
+
         camera_fb_t* fb = esp_camera_fb_get();
         if (!fb) {
-            vTaskDelay(pdMS_TO_TICKS(10));
+            // cam_hal timeout — DMA/VSYNC may be stuck. After 3 consecutive
+            // failures (~6 s) reinit the camera to clear the I2S DMA state.
+            if (++fail_count >= 3 && !camera_is_paused()) {
+                ESP_LOGW(TAG, "Camera DMA stuck (%d timeouts) — reiniting", fail_count);
+                led_status_set(LED_RETRY);
+                camera_pause();
+                vTaskDelay(pdMS_TO_TICKS(200));
+                camera_reinit(s_state);
+                vTaskDelay(pdMS_TO_TICKS(200));
+                camera_resume();
+                led_status_set(LED_STREAMING);
+                fail_count = 0;
+            } else {
+                vTaskDelay(pdMS_TO_TICKS(100));
+            }
             continue;
         }
+        fail_count = 0;
 
         // Copy to the static buffer and return the DMA buffer immediately so
         // the camera can start capturing the next frame while we're on the wire.
@@ -115,13 +141,17 @@ static void handle_client(int fd) {
         if (s_state->fpsLimit > 0) {
             vTaskDelay(pdMS_TO_TICKS(1000 / s_state->fpsLimit));
         } else {
-            taskYIELD();
+            // vTaskDelay(1) instead of taskYIELD(): gives httpd (same priority,
+            // same core) a guaranteed 1-tick window to process stats/config
+            // requests without starving behind a tight MJPEG send loop.
+            vTaskDelay(pdMS_TO_TICKS(1));
         }
     }
 
     s_fps = 0.0f;
     s_bps = 0;
     s_client_active = false;
+    led_status_set(LED_READY);
 
     close(fd);
     ESP_LOGI(TAG, "client disconnected");

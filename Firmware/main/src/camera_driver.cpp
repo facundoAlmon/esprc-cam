@@ -1,7 +1,15 @@
 #include "camera_driver.h"
 #include "esp_log.h"
+#include "driver/gpio.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static const char* TAG = "Camera";
+
+static volatile bool s_paused = false;
+void camera_pause(void)  { s_paused = true; }
+void camera_resume(void) { s_paused = false; }
+bool camera_is_paused(void) { return s_paused; }
 
 // AI-Thinker ESP32-CAM pin assignment
 #define CAM_PIN_PWDN    32
@@ -22,6 +30,16 @@ static const char* TAG = "Camera";
 #define CAM_PIN_PCLK    22
 
 esp_err_t camera_init(const CameraState* st) {
+    // Power-cycle the OV2640 via PWDN before init.
+    // The AI-Thinker module sometimes holds the sensor in an undefined power
+    // state after a soft reset; toggling PWDN puts it in a known state before
+    // SCCB probing begins.
+    gpio_set_direction((gpio_num_t)CAM_PIN_PWDN, GPIO_MODE_OUTPUT);
+    gpio_set_level((gpio_num_t)CAM_PIN_PWDN, 1);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    gpio_set_level((gpio_num_t)CAM_PIN_PWDN, 0);
+    vTaskDelay(pdMS_TO_TICKS(300));
+
     camera_config_t config = {};
     config.pin_pwdn     = CAM_PIN_PWDN;
     config.pin_reset    = CAM_PIN_RESET;
