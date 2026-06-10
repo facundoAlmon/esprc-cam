@@ -80,11 +80,11 @@ Both expose the same OV2640 hardware JPEG frames. `CAMERA_GRAB_WHEN_EMPTY + fb_c
 
 Fix: init camera with hardcoded defaults (QVGA/12), drain 5 warmup frames, then load NVS + reinit camera with saved framesize/quality.
 
-**PWDN power-cycle** — `camera_init()` toggles GPIO 32 HIGH (10 ms) → LOW (300 ms) before `esp_camera_init()`. The AI-Thinker module sometimes holds the OV2640 in an undefined state after a soft reset; the cycle puts it in a known state before SCCB probing.
+**PWDN power-cycle** — `camera_init()` toggles GPIO 32 HIGH (500 ms) → LOW (300 ms) before `esp_camera_init()`. On AI-Thinker, PWDN=HIGH gates the sensor's 2.8V/1.2V regulators — a real power cut. The 500 ms HIGH lets the rails fully discharge; shorter pulses leave the sensor with retained corrupt state (SCCB probe then returns an invalid PID → "Detected camera not supported").
 
 **5-retry init loop** — `main_task` retries `camera_init()` up to 5 times with 1 s delay between attempts. On total failure calls `esp_restart()` (not an infinite loop) to reset all hardware state cleanly.
 
-**DMA stuck recovery** — both `mjpeg_server` and `streamer` count consecutive NULL `fb_get()` returns. After 3 failures (~6 s) they call `camera_pause()` + `camera_reinit()` + `camera_resume()`. The webserver's `post_config_handler` does the same when framesize/quality change.
+**DMA stuck recovery** — both `mjpeg_server` and `streamer` count consecutive NULL `fb_get()` returns. After 3 failures (~6 s) they call `camera_pause()` + `camera_reinit()` + `camera_resume()`. The webserver's `post_config_handler` does the same when framesize/quality change. `camera_reinit()` itself counts consecutive failures across all callers; after 5 it calls `esp_restart()` instead of looping forever.
 
 **`camera_pause()` / `camera_resume()`** — volatile bool that streaming tasks poll before calling `fb_get()`. After setting `camera_pause = true`, caller waits 200 ms (enough for any in-flight `fb_get()` in the normal/non-stuck case to return) before `camera_reinit()`.
 

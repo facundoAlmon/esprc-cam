@@ -1,5 +1,6 @@
 #include "camera_driver.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -31,12 +32,14 @@ bool camera_is_paused(void) { return s_paused; }
 
 esp_err_t camera_init(const CameraState* st) {
     // Power-cycle the OV2640 via PWDN before init.
-    // The AI-Thinker module sometimes holds the sensor in an undefined power
-    // state after a soft reset; toggling PWDN puts it in a known state before
-    // SCCB probing begins.
+    // On the AI-Thinker board PWDN=HIGH gates the sensor's 2.8V/1.2V
+    // regulators, so this is a real power cut — but the rails need time to
+    // discharge or the sensor retains corrupted state (symptom: SCCB probe
+    // returns an invalid PID → "Detected camera not supported"). 500 ms HIGH
+    // ensures a full discharge before re-powering.
     gpio_set_direction((gpio_num_t)CAM_PIN_PWDN, GPIO_MODE_OUTPUT);
     gpio_set_level((gpio_num_t)CAM_PIN_PWDN, 1);
-    vTaskDelay(pdMS_TO_TICKS(10));
+    vTaskDelay(pdMS_TO_TICKS(500));
     gpio_set_level((gpio_num_t)CAM_PIN_PWDN, 0);
     vTaskDelay(pdMS_TO_TICKS(300));
 
@@ -133,9 +136,24 @@ void camera_apply_settings(const CameraState* st) {
     camera_apply_image_settings(st);
 }
 
+// Consecutive runtime-reinit failures (DMA-stuck recovery or config change).
+// If the sensor stays unprobeable across several full power cycles, the
+// streaming tasks would otherwise loop reinit forever — escalate to a full
+// chip restart, which redoes init from a clean hardware state.
+#define REINIT_FAIL_RESTART_THRESHOLD 5
+static int s_reinit_failures = 0;
+
 esp_err_t camera_reinit(const CameraState* st) {
     camera_deinit();
-    return camera_init(st);
+    esp_err_t err = camera_init(st);
+    if (err == ESP_OK) {
+        s_reinit_failures = 0;
+    } else if (++s_reinit_failures >= REINIT_FAIL_RESTART_THRESHOLD) {
+        ESP_LOGE(TAG, "Camera reinit failed %d times — restarting ESP", s_reinit_failures);
+        vTaskDelay(pdMS_TO_TICKS(100));  // let the log line flush
+        esp_restart();
+    }
+    return err;
 }
 
 void camera_deinit(void) {
