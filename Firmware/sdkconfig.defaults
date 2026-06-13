@@ -42,10 +42,18 @@ CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ=240
 CONFIG_ESP_WIFI_IRAM_OPT=y
 CONFIG_ESP_WIFI_RX_IRAM_OPT=y
 
-# lwIP TCP window — must hold at least one full QVGA JPEG (~15 KB) to avoid
-# per-frame ACK stalls. 32 KB = ~22 TCP segments in flight simultaneously.
-CONFIG_LWIP_TCP_SND_BUF_DEFAULT=32768
-CONFIG_LWIP_TCP_WND_DEFAULT=32768
+# lwIP hot paths in IRAM — reduces cache misses on every TCP send(), which
+# is called once per MJPEG frame (~12-20 times/second).
+CONFIG_LWIP_IRAM_OPTIMIZATION=y
+
+# lwIP task pinned to core 1 so it runs in parallel with mjpeg_task (core 0).
+# Without affinity, LwIP can land on core 0 and time-share with mjpeg_task.
+CONFIG_LWIP_TCPIP_TASK_AFFINITY_CPU1=y
+
+# lwIP TCP window — SVGA JPEGs at quality 12 can reach 40-60 KB; 64 KB window
+# lets a full frame be in-flight without waiting for an ACK round-trip.
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=65535
+CONFIG_LWIP_TCP_WND_DEFAULT=65535
 
 # Disable brownout detector — AI-Thinker ESP32-CAM voltage regulator has
 # marginal headroom when WiFi TX + I2S DMA + PSRAM run simultaneously.

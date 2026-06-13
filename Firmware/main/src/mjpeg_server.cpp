@@ -21,8 +21,9 @@ static volatile bool     s_client_active = false;
 
 #define MJPEG_PORT  81
 #define BOUNDARY    "ESP32CAM"
-// 32 KB — enough headroom for any QVGA/SVGA JPEG at the quality levels we use.
-#define FRAME_BUF   (32 * 1024)
+// 64 KB — SVGA JPEGs at quality 12 can exceed 32 KB on complex scenes;
+// truncating a JPEG silently causes the browser to discard the frame.
+#define FRAME_BUF   (64 * 1024)
 
 static const CameraState* s_state = NULL;
 static volatile bool s_running = false;

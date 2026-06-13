@@ -62,7 +62,7 @@ esp_err_t camera_init(const CameraState* st) {
     config.pin_pclk     = CAM_PIN_PCLK;
 
     // Match ESPHome's working configuration exactly.
-    config.xclk_freq_hz = 20000000;
+    config.xclk_freq_hz = 24000000;
     config.ledc_timer   = LEDC_TIMER_0;   // ESPHome default
     config.ledc_channel = LEDC_CHANNEL_0; // ESPHome default
 
